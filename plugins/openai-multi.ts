@@ -2,16 +2,14 @@
  * OpenCode Plugin: OpenAI Multi-Account Switcher
  *
  * Exports:
- * - OpenAIMultiAccountPlugin (L22): Plugin entrypoint.
- * - STORAGE_PATH (L41): Where profiles are stored.
- * - AUTH_PATH (L45): Where OpenCode stores active provider auth.
+ * - OpenAIMultiAccountPlugin (L225): Plugin entrypoint.
  *
  * Commands handled (via command.execute.before hook):
- * - /oai list (L175): List saved profiles.
- * - /oai current (L207): Show active OpenAI account (from auth.json).
- * - /oai save <name> (L231): Save current OpenAI OAuth creds as a profile.
- * - /oai use <name> (L285): Switch active OpenAI creds to a saved profile.
- * - /oai remove <name> (L346): Remove a saved profile.
+ * - /oai                 (L276): List saved profiles.
+ * - /oai list            (L276): List saved profiles.
+ * - /oai save <name>     (L311): Save current OpenAI OAuth creds as a profile.
+ * - /oai load <name>     (L381): Switch active OpenAI creds to a saved profile.
+ * - /oai del <name|num>  (L349): Remove a saved profile.
  *
  * Notes:
  * - This plugin targets OpenAI "ChatGPT Plus/Pro" OAuth flow used by `/connect`.
@@ -55,8 +53,37 @@ type StorageFile = {
   profiles: Record<string, StoredOAuthProfile>;
 };
 
-const STORAGE_PATH = `${process.env.HOME ?? ""}/.config/opencode/openai-accounts.json`;
-const AUTH_PATH = `${process.env.HOME ?? ""}/.local/share/opencode/auth.json`;
+/**
+ * Resolve OpenCode directories in an XDG-compatible way.
+ *
+ * Invariant:
+ * - If neither XDG_* nor HOME is available, we fail fast; we cannot guess paths.
+ */
+function resolveXdgPaths(): {
+  configHome: string;
+  dataHome: string;
+} {
+  const home = process.env.HOME;
+  const xdgConfigHome = process.env.XDG_CONFIG_HOME;
+  const xdgDataHome = process.env.XDG_DATA_HOME;
+
+  if (!xdgConfigHome && !xdgDataHome && !home) {
+    throw new Error(
+      "Cannot resolve OpenCode paths: HOME, XDG_CONFIG_HOME, and XDG_DATA_HOME are all unset.",
+    );
+  }
+
+  return {
+    configHome: xdgConfigHome ?? `${home}/.config`,
+    dataHome: xdgDataHome ?? `${home}/.local/share`,
+  };
+}
+
+const { configHome: XDG_CONFIG_HOME, dataHome: XDG_DATA_HOME } =
+  resolveXdgPaths();
+
+const STORAGE_PATH = `${XDG_CONFIG_HOME}/opencode/openai-accounts.json`;
+const AUTH_PATH = `${XDG_DATA_HOME}/opencode/auth.json`;
 
 const PROVIDER_ID = "openai";
 const COMMAND = "oai";
@@ -67,7 +94,6 @@ const EMAIL_CLAIM_KEY = "https://api.openai.com/profile";
  * Keep parsing strict: we don't want accidental destructive operations.
  */
 function parseArgs(raw: string): string[] {
-  // Split by whitespace; OpenCode already passes raw arguments, not including the leading command.
   return raw.trim().split(/\s+/).filter(Boolean);
 }
 
@@ -105,20 +131,6 @@ async function loadStorage(): Promise<StorageFile> {
 async function saveStorage(storage: StorageFile): Promise<void> {
   // Invariant: always keep version pinned for future migrations.
   await writeJsonFile(STORAGE_PATH, storage);
-}
-
-function assertNonEmpty(value: string, label: string): void {
-  if (!value.trim()) {
-    throw new Error(`${label} must be non-empty`);
-  }
-}
-
-function formatProfileLine(p: StoredOAuthProfile): string {
-  const exp = new Date(p.oauth.expires).toISOString();
-  const acct = p.oauth.accountId ? ` accountId=${p.oauth.accountId}` : "";
-  const email = extractEmailFromAccessToken(p.oauth.access);
-  const emailPart = email ? ` email=${email}` : "";
-  return `- ${p.name}${emailPart} (expires=${exp}${acct}, savedAt=${p.savedAt})`;
 }
 
 type OpenCodeAuthFile = Record<string, any>;
@@ -203,54 +215,6 @@ function isSameOauth(
   if (!b) return false;
   if (a.accountId && b.accountId) return a.accountId === b.accountId;
   return a.refresh === b.refresh;
-}
-
-function helpText(): string {
-  /**
-   * We intentionally keep the public surface area tiny.
-   *
-   * Older subcommands are still accepted as aliases, but we don't advertise them.
-   */
-  return [
-    "OpenAI multi-account:",
-    "- /oai                 (menu)",
-    "- /oai <name|number>    (activate)",
-    "- /oai d <number>       (delete)",
-    "- /oai save <name>      (save current openai oauth)",
-  ].join("\n");
-}
-
-function buildMenuText(params: {
-  names: string[];
-  profiles: Record<string, StoredOAuthProfile>;
-  activeOauth?: StoredOAuthProfile["oauth"];
-}): string {
-  /**
-   * This is a text menu because plugins don't currently have access to
-   * OpenCode's interactive selector UI.
-   */
-  const lines = params.names.map((name, idx) => {
-    const p = params.profiles[name]!;
-    const activeMark =
-      params.activeOauth && isSameOauth(p.oauth, params.activeOauth)
-        ? "*"
-        : " ";
-    const email = extractEmailFromAccessToken(p.oauth.access);
-    const emailPart = email ? ` (${email})` : "";
-    return `${activeMark} ${idx + 1}) ${name}${emailPart}`;
-  });
-
-  return [
-    "```text",
-    "OpenAI accounts:",
-    lines.length === 0 ? "(no saved profiles)" : lines.join("\n"),
-    "",
-    "Actions:",
-    "- /oai <number|name>        activate",
-    "- /oai d <number>           delete",
-    "- /oai save <name>          save current OpenAI OAuth",
-    "```",
-  ].join("\n");
 }
 
 export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {

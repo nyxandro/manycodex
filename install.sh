@@ -16,8 +16,20 @@ BASE_URL="https://raw.githubusercontent.com/nyxandro/manycodex/main"
 PLUGIN_FILE="plugins/openai-multi.ts"
 CMD_FILE="commands/oai.md"
 
-# Целевые директории OpenCode
-CONFIG_DIR="$HOME/.config/opencode"
+# Целевые директории OpenCode (global install)
+#
+# Почему так:
+# - OpenCode по документации грузит global plugins из `~/.config/opencode/plugins/`.
+# - На Linux/WSL/macOS принято уважать XDG, поэтому используем XDG_CONFIG_HOME,
+#   а если он не задан — стандартный `~/.config`.
+if [ -z "${XDG_CONFIG_HOME:-}" ] && [ -z "${HOME:-}" ]; then
+    echo -e "${RED}[ERR] Не задан HOME или XDG_CONFIG_HOME. Невозможно определить папку конфигурации OpenCode.${NC}"
+    exit 1
+fi
+
+XDG_CONFIG_HOME_FALLBACK="${XDG_CONFIG_HOME:-${HOME}/.config}"
+
+CONFIG_DIR="$XDG_CONFIG_HOME_FALLBACK/opencode"
 DEST_PLUGIN_DIR="$CONFIG_DIR/plugins"
 DEST_CMD_DIR="$CONFIG_DIR/commands"
 
