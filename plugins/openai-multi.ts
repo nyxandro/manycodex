@@ -193,13 +193,14 @@ function extractEmailFromAccessToken(access: string): string | undefined {
 
 function isSameOauth(
   a: StoredOAuthProfile["oauth"],
-  b: StoredOAuthProfile["oauth"],
+  b?: StoredOAuthProfile["oauth"],
 ): boolean {
   /**
    * Prefer stable identifier if present. Fall back to refresh token equality.
    *
    * This is used only to highlight the active profile.
    */
+  if (!b) return false;
   if (a.accountId && b.accountId) return a.accountId === b.accountId;
   return a.refresh === b.refresh;
 }
@@ -222,7 +223,7 @@ function helpText(): string {
 function buildMenuText(params: {
   names: string[];
   profiles: Record<string, StoredOAuthProfile>;
-  activeOauth: StoredOAuthProfile["oauth"];
+  activeOauth?: StoredOAuthProfile["oauth"];
 }): string {
   /**
    * This is a text menu because plugins don't currently have access to
@@ -230,7 +231,10 @@ function buildMenuText(params: {
    */
   const lines = params.names.map((name, idx) => {
     const p = params.profiles[name]!;
-    const activeMark = isSameOauth(p.oauth, params.activeOauth) ? "*" : " ";
+    const activeMark =
+      params.activeOauth && isSameOauth(p.oauth, params.activeOauth)
+        ? "*"
+        : " ";
     const email = extractEmailFromAccessToken(p.oauth.access);
     const emailPart = email ? ` (${email})` : "";
     return `${activeMark} ${idx + 1}) ${name}${emailPart}`;
@@ -276,8 +280,16 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
         // Default: show menu.
         if (normalizedSub === "") {
           const storage = await loadStorage();
-          const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
-          const activeOauth = readOpenAiAuthFromAuthFile(authFile);
+          let activeOauth: StoredOAuthProfile["oauth"] | undefined;
+
+          try {
+            // Try to read active auth, but don't fail menu if missing
+            const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
+            activeOauth = readOpenAiAuthFromAuthFile(authFile);
+          } catch (e) {
+            // Ignore auth errors in menu view (e.g. not connected yet)
+          }
+
           const names = Object.keys(storage.profiles).sort((a, b) =>
             a.localeCompare(b),
           );
