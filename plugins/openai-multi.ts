@@ -256,14 +256,6 @@ function buildMenuText(params: {
 export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
   return {
     "command.execute.before": async (input, output) => {
-      await client.tui.showToast({
-        body: {
-          message: `OpenAIMultiAccountPlugin: command.execute.before called for command: ${input.command}`,
-          variant: "info",
-        },
-        duration: 1000, // Short duration for debug toast
-      });
-
       // Normalize command: remove leading/trailing whitespace and slash
       const cmd = input.command.trim().replace(/^\//, "").toLowerCase();
 
