@@ -271,23 +271,24 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
       if (cmd !== COMMAND) return;
 
       const argv = parseArgs(input.arguments);
-      const sub = argv[0] ?? "";
+      const rawSub = (argv[0] ?? "").toLowerCase();
 
-      /**
-       * Backwards-compatible aliases.
-       *
-       * We accept older verbs but treat the public API as the menu-driven `/oai`.
-       */
-      const normalizedSub =
-        sub === "help"
-          ? ""
-          : sub === "switch"
-            ? "load"
-            : sub === "list"
-              ? "_list"
-              : sub === "current"
-                ? "_current"
-                : sub;
+      // 1. Normalize Action
+      let action: "list" | "save" | "del" | "load" | "unknown" = "unknown";
+
+      if (!rawSub || ["list", "help", "ls", "_list"].includes(rawSub)) {
+        action = "list";
+      } else if (["save", "s"].includes(rawSub)) {
+        action = "save";
+      } else if (["del", "delete", "rm", "remove", "d"].includes(rawSub)) {
+        action = "del";
+      } else if (["load", "use", "switch", "l"].includes(rawSub)) {
+        action = "load";
+      } else {
+        // If the first argument isn't a keyword, assume it's a profile name/number for loading
+        // e.g. "/oai personal" or "/oai 1"
+        action = "load";
+      }
 
       try {
         // Validation helper for 'save' and strict checks
@@ -302,19 +303,21 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           }
         };
 
-        // 1. LIST (Default or explicit)
-        if (normalizedSub === "" || normalizedSub === "_list") {
+        const loadStorageAndAuth = async () => {
           const storage = await loadStorage();
           let activeOauth: StoredOAuthProfile["oauth"] | undefined;
           try {
             const auth = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
-            if (auth[PROVIDER_ID]) {
+            if (auth[PROVIDER_ID])
               activeOauth = readOpenAiAuthFromAuthFile(auth);
-            }
           } catch (e) {
             /* ignore */
           }
+          return { storage, activeOauth };
+        };
 
+        if (action === "list") {
+          const { storage, activeOauth } = await loadStorageAndAuth();
           const names = Object.keys(storage.profiles).sort((a, b) =>
             a.localeCompare(b),
           );
@@ -338,34 +341,28 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
 
             await client.tui.showToast({
               body: {
-                message: `Profiles: ${listStr}. Use '/oai <name>' to switch.`,
+                message: `Profiles: ${listStr}. Use '/oai load <name>' to switch.`,
                 variant: "info",
               },
               duration: 8000,
             });
           }
-
-          output.parts = []; // Zero chat output
+          output.parts = [];
           return;
         }
 
-        // 2. SAVE
-        if (normalizedSub === "save") {
+        if (action === "save") {
           const name = argv[1] ?? "";
-          if (!name) throw new Error("Usage: /oai save <profile_name>");
+          if (!name) throw new Error("Usage: /oai save <name>");
 
           const oauth = await ensureActiveAuth();
-
-          // Basic validation of token existence (simple check)
           if (!oauth.access || !oauth.refresh) {
             throw new Error(
-              "Active OpenAI auth seems invalid (missing tokens). Try /connect again.",
+              "Active OpenAI auth seems invalid. Try /connect again.",
             );
           }
 
           const storage = await loadStorage();
-
-          // Check for existence
           if (storage.profiles[name]) {
             throw new Error(
               `Profile '${name}' already exists. Use a different name.`,
@@ -388,96 +385,96 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
               variant: "success",
             },
           });
-          // No chat output, keep it clean
           output.parts = [];
           return;
         }
 
-        // 3. REMOVE
-        if (
-          normalizedSub === "d" ||
-          normalizedSub === "rm" ||
-          normalizedSub === "remove" ||
-          normalizedSub === "del"
-        ) {
-          const selector = argv[1] ?? "";
-          if (!selector) throw new Error("Usage: /oai del <name>");
+        if (action === "del") {
+          const nameOrNum = argv[1] ?? "";
+          if (!nameOrNum) throw new Error("Usage: /oai del <name>");
 
           const storage = await loadStorage();
           const names = Object.keys(storage.profiles).sort((a, b) =>
             a.localeCompare(b),
           );
 
-          let name = selector;
-          const asNum = parseInt(selector, 10);
+          let targetName = nameOrNum;
+          const asNum = parseInt(nameOrNum, 10);
           if (!isNaN(asNum) && asNum > 0 && asNum <= names.length) {
-            name = names[asNum - 1];
+            targetName = names[asNum - 1];
           }
 
-          if (!storage.profiles[name])
-            throw new Error(`Profile '${name}' not found.`);
+          if (!storage.profiles[targetName]) {
+            throw new Error(`Profile '${targetName}' not found.`);
+          }
 
-          delete storage.profiles[name];
+          delete storage.profiles[targetName];
           await saveStorage(storage);
 
           await client.tui.showToast({
-            body: { message: `Removed profile '${name}'`, variant: "success" },
+            body: {
+              message: `Removed profile '${targetName}'`,
+              variant: "success",
+            },
           });
           output.parts = [];
           return;
         }
 
-        // 4. LOAD (USE/ACTIVATE)
-        // Handle "/oai use <name>" or "/oai load <name>" or just "/oai <name>"
-        if (normalizedSub === "use" || normalizedSub === "load") {
-          argv.shift();
-        }
-        const selector = argv[0] ?? normalizedSub;
+        if (action === "load") {
+          // If first arg was a command keyword (like 'load', 'use'), target is the second arg: argv[1].
+          // If first arg was NOT a keyword (implicit load: `/oai myprofile`), target is the first arg: rawSub.
+          let targetName = "";
+          // Re-check original sub to see if it was a keyword or not. rawSub holds normalized argv[0].
+          if (["load", "use", "switch", "l"].includes(rawSub)) {
+            targetName = argv[1] ?? "";
+          } else {
+            targetName = rawSub; // Implicit load
+          }
 
-        // If the command was just "/oai load" or "/oai use" without args:
-        if (!selector || selector === "use" || selector === "load") {
-          throw new Error("Usage: /oai load <name>");
-        }
+          if (!targetName) throw new Error("Usage: /oai load <name>");
 
-        const storage = await loadStorage();
-        const names = Object.keys(storage.profiles).sort((a, b) =>
-          a.localeCompare(b),
-        );
-
-        let name = selector;
-        const asNum = parseInt(selector, 10);
-        if (!isNaN(asNum) && asNum > 0 && asNum <= names.length) {
-          name = names[asNum - 1];
-        }
-
-        const profile = storage.profiles[name];
-        if (!profile)
-          throw new Error(
-            `Profile '${name}' not found. Use '/oai list' to see available.`,
+          const storage = await loadStorage();
+          const names = Object.keys(storage.profiles).sort((a, b) =>
+            a.localeCompare(b),
           );
 
-        await client.auth.set({
-          path: { id: PROVIDER_ID },
-          body: {
-            type: "oauth",
-            refresh: profile.oauth.refresh,
-            access: profile.oauth.access,
-            expires: profile.oauth.expires,
-            ...(profile.oauth.enterpriseUrl
-              ? { enterpriseUrl: profile.oauth.enterpriseUrl }
-              : {}),
-          },
-        });
+          // Resolve number to name if possible
+          const asNum = parseInt(targetName, 10);
+          if (!isNaN(asNum) && asNum > 0 && asNum <= names.length) {
+            targetName = names[asNum - 1];
+          }
 
-        const email = extractEmailFromAccessToken(profile.oauth.access);
-        await client.tui.showToast({
-          body: {
-            message: email ? `Active: ${name} (${email})` : `Active: ${name}`,
-            variant: "success",
-          },
-        });
-        output.parts = [];
-        return;
+          const profile = storage.profiles[targetName];
+          if (!profile) {
+            throw new Error(`Profile '${targetName}' not found.`);
+          }
+
+          await client.auth.set({
+            path: { id: PROVIDER_ID },
+            body: {
+              type: "oauth",
+              refresh: profile.oauth.refresh,
+              access: profile.oauth.access,
+              expires: profile.oauth.expires,
+              ...(profile.oauth.enterpriseUrl
+                ? { enterpriseUrl: profile.oauth.enterpriseUrl }
+                : {}),
+            },
+          });
+
+          const email = extractEmailFromAccessToken(profile.oauth.access);
+          await client.tui.showToast({
+            body: {
+              message: email
+                ? `Active: ${targetName} (${email})`
+                : `Active: ${targetName}`,
+              variant: "success",
+            },
+          });
+          output.parts = [];
+          return;
+        }
       } catch (error) {
         // Boundary: Use Toast for errors instead of Chat
         const message = error instanceof Error ? error.message : String(error);
