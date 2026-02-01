@@ -241,6 +241,7 @@ function buildMenuText(params: {
   });
 
   return [
+    "```text",
     "OpenAI accounts:",
     lines.length === 0 ? "(no saved profiles)" : lines.join("\n"),
     "",
@@ -248,6 +249,7 @@ function buildMenuText(params: {
     "- /oai <number|name>        activate",
     "- /oai d <number>           delete",
     "- /oai save <name>          save current OpenAI OAuth",
+    "```",
   ].join("\n");
 }
 
