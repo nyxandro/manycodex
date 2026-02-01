@@ -55,8 +55,8 @@ type StorageFile = {
   profiles: Record<string, StoredOAuthProfile>;
 };
 
-export const STORAGE_PATH = `${process.env.HOME ?? ""}/.config/opencode/openai-accounts.json`;
-export const AUTH_PATH = `${process.env.HOME ?? ""}/.local/share/opencode/auth.json`;
+const STORAGE_PATH = `${process.env.HOME ?? ""}/.config/opencode/openai-accounts.json`;
+const AUTH_PATH = `${process.env.HOME ?? ""}/.local/share/opencode/auth.json`;
 
 const PROVIDER_ID = "openai";
 const COMMAND = "oai";
@@ -68,10 +68,7 @@ const EMAIL_CLAIM_KEY = "https://api.openai.com/profile";
  */
 function parseArgs(raw: string): string[] {
   // Split by whitespace; OpenCode already passes raw arguments, not including the leading command.
-  return raw
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+  return raw.trim().split(/\s+/).filter(Boolean);
 }
 
 async function readJsonFile<T>(path: string): Promise<T> {
@@ -95,7 +92,11 @@ async function loadStorage(): Promise<StorageFile> {
     return { version: 1, profiles: {} };
   }
   const parsed = (await file.json()) as Partial<StorageFile>;
-  if (parsed.version !== 1 || typeof parsed.profiles !== "object" || parsed.profiles === null) {
+  if (
+    parsed.version !== 1 ||
+    typeof parsed.profiles !== "object" ||
+    parsed.profiles === null
+  ) {
     throw new Error(`Invalid storage format in ${STORAGE_PATH}`);
   }
   return parsed as StorageFile;
@@ -122,19 +123,29 @@ function formatProfileLine(p: StoredOAuthProfile): string {
 
 type OpenCodeAuthFile = Record<string, any>;
 
-function readOpenAiAuthFromAuthFile(authFile: OpenCodeAuthFile): StoredOAuthProfile["oauth"] {
+function readOpenAiAuthFromAuthFile(
+  authFile: OpenCodeAuthFile,
+): StoredOAuthProfile["oauth"] {
   // We rely on OpenCode's on-disk state; if it doesn't match expected shape, do not guess.
   const entry = authFile[PROVIDER_ID];
   if (!entry) {
-    throw new Error(`No auth entry for provider '${PROVIDER_ID}' in ${AUTH_PATH}. Run /connect first.`);
+    throw new Error(
+      `No auth entry for provider '${PROVIDER_ID}' in ${AUTH_PATH}. Run /connect first.`,
+    );
   }
   if (entry.type !== "oauth") {
     throw new Error(
-      `Provider '${PROVIDER_ID}' auth is not oauth (got '${String(entry.type)}'). This plugin supports OAuth accounts.`
+      `Provider '${PROVIDER_ID}' auth is not oauth (got '${String(entry.type)}'). This plugin supports OAuth accounts.`,
     );
   }
-  if (typeof entry.refresh !== "string" || typeof entry.access !== "string" || typeof entry.expires !== "number") {
-    throw new Error(`Invalid oauth payload for provider '${PROVIDER_ID}' in ${AUTH_PATH}`);
+  if (
+    typeof entry.refresh !== "string" ||
+    typeof entry.access !== "string" ||
+    typeof entry.expires !== "number"
+  ) {
+    throw new Error(
+      `Invalid oauth payload for provider '${PROVIDER_ID}' in ${AUTH_PATH}`,
+    );
   }
   const oauth: StoredOAuthProfile["oauth"] = {
     refresh: entry.refresh,
@@ -143,7 +154,8 @@ function readOpenAiAuthFromAuthFile(authFile: OpenCodeAuthFile): StoredOAuthProf
   };
 
   // Optional fields; we keep them if present.
-  if (typeof entry.enterpriseUrl === "string") oauth.enterpriseUrl = entry.enterpriseUrl;
+  if (typeof entry.enterpriseUrl === "string")
+    oauth.enterpriseUrl = entry.enterpriseUrl;
   if (typeof entry.accountId === "string") oauth.accountId = entry.accountId;
 
   return oauth;
@@ -179,7 +191,10 @@ function extractEmailFromAccessToken(access: string): string | undefined {
   }
 }
 
-function isSameOauth(a: StoredOAuthProfile["oauth"], b: StoredOAuthProfile["oauth"]): boolean {
+function isSameOauth(
+  a: StoredOAuthProfile["oauth"],
+  b: StoredOAuthProfile["oauth"],
+): boolean {
   /**
    * Prefer stable identifier if present. Fall back to refresh token equality.
    *
@@ -247,7 +262,15 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
        * We accept older verbs but treat the public API as the menu-driven `/oai`.
        */
       const normalizedSub =
-        sub === "help" ? "" : sub === "switch" ? "" : sub === "list" ? "_list" : sub === "current" ? "_current" : sub;
+        sub === "help"
+          ? ""
+          : sub === "switch"
+            ? ""
+            : sub === "list"
+              ? "_list"
+              : sub === "current"
+                ? "_current"
+                : sub;
 
       try {
         // Default: show menu.
@@ -255,12 +278,18 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           const storage = await loadStorage();
           const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
           const activeOauth = readOpenAiAuthFromAuthFile(authFile);
-          const names = Object.keys(storage.profiles).sort((a, b) => a.localeCompare(b));
+          const names = Object.keys(storage.profiles).sort((a, b) =>
+            a.localeCompare(b),
+          );
 
           output.parts = [
             {
               type: "text",
-              text: buildMenuText({ names, profiles: storage.profiles, activeOauth }),
+              text: buildMenuText({
+                names,
+                profiles: storage.profiles,
+                activeOauth,
+              }),
             },
           ];
           return;
@@ -271,7 +300,9 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           const storage = await loadStorage();
           const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
           const activeOauth = readOpenAiAuthFromAuthFile(authFile);
-          const names = Object.keys(storage.profiles).sort((a, b) => a.localeCompare(b));
+          const names = Object.keys(storage.profiles).sort((a, b) =>
+            a.localeCompare(b),
+          );
           const lines = names.map((n) => {
             const p = storage.profiles[n]!;
             const activeMark = isSameOauth(p.oauth, activeOauth) ? "* " : "  ";
@@ -280,7 +311,10 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           output.parts = [
             {
               type: "text",
-              text: lines.length === 0 ? "No saved profiles." : ["Saved OpenAI profiles:", ...lines].join("\n"),
+              text:
+                lines.length === 0
+                  ? "No saved profiles."
+                  : ["Saved OpenAI profiles:", ...lines].join("\n"),
             },
           ];
           return;
@@ -315,11 +349,18 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           };
           await saveStorage(storage);
 
-          output.parts = [{ type: "text", text: `Saved profile '${name}' to ${STORAGE_PATH}` }];
+          output.parts = [
+            {
+              type: "text",
+              text: `Saved profile '${name}' to ${STORAGE_PATH}`,
+            },
+          ];
           const email = extractEmailFromAccessToken(oauth.access);
           await client.tui.showToast({
             body: {
-              message: email ? `OpenAI profile saved: ${name} (${email})` : `OpenAI profile saved: ${name}`,
+              message: email
+                ? `OpenAI profile saved: ${name} (${email})`
+                : `OpenAI profile saved: ${name}`,
               variant: "success",
             },
           });
@@ -327,22 +368,38 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
         }
 
         // Delete (public): /oai d <number>
-        if (normalizedSub === "d" || normalizedSub === "rm" || normalizedSub === "remove") {
+        if (
+          normalizedSub === "d" ||
+          normalizedSub === "rm" ||
+          normalizedSub === "remove"
+        ) {
           const selector = argv[1] ?? "";
           assertNonEmpty(selector, "Profile number");
 
           const storage = await loadStorage();
-          const names = Object.keys(storage.profiles).sort((a, b) => a.localeCompare(b));
+          const names = Object.keys(storage.profiles).sort((a, b) =>
+            a.localeCompare(b),
+          );
           const asNumber = Number(selector);
-          const name = Number.isFinite(asNumber) && String(asNumber) === selector ? names[asNumber - 1] : undefined;
-          if (!name) throw new Error(`Invalid selection '${selector}'. Use: /oai`);
-          if (!storage.profiles[name]) throw new Error(`Unknown profile '${name}'. Use: /oai`);
+          const name =
+            Number.isFinite(asNumber) && String(asNumber) === selector
+              ? names[asNumber - 1]
+              : undefined;
+          if (!name)
+            throw new Error(`Invalid selection '${selector}'. Use: /oai`);
+          if (!storage.profiles[name])
+            throw new Error(`Unknown profile '${name}'. Use: /oai`);
 
           delete storage.profiles[name];
           await saveStorage(storage);
 
           output.parts = [{ type: "text", text: `Removed profile '${name}'` }];
-          await client.tui.showToast({ body: { message: `OpenAI profile removed: ${name}`, variant: "success" } });
+          await client.tui.showToast({
+            body: {
+              message: `OpenAI profile removed: ${name}`,
+              variant: "success",
+            },
+          });
           return;
         }
 
@@ -363,10 +420,15 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
         assertNonEmpty(selector, "Profile name or number");
 
         const storage = await loadStorage();
-        const names = Object.keys(storage.profiles).sort((a, b) => a.localeCompare(b));
+        const names = Object.keys(storage.profiles).sort((a, b) =>
+          a.localeCompare(b),
+        );
 
         const asNumber = Number(selector);
-        const name = Number.isFinite(asNumber) && String(asNumber) === selector ? names[asNumber - 1] : selector;
+        const name =
+          Number.isFinite(asNumber) && String(asNumber) === selector
+            ? names[asNumber - 1]
+            : selector;
         if (!name) {
           throw new Error(`Invalid selection '${selector}'. Use: /oai`);
         }
@@ -382,7 +444,9 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
             refresh: profile.oauth.refresh,
             access: profile.oauth.access,
             expires: profile.oauth.expires,
-            ...(profile.oauth.enterpriseUrl ? { enterpriseUrl: profile.oauth.enterpriseUrl } : {}),
+            ...(profile.oauth.enterpriseUrl
+              ? { enterpriseUrl: profile.oauth.enterpriseUrl }
+              : {}),
           },
         });
 
@@ -390,12 +454,16 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
         output.parts = [
           {
             type: "text",
-            text: email ? `OpenAI active: ${email}` : `Switched active OpenAI account to profile '${name}'`,
+            text: email
+              ? `OpenAI active: ${email}`
+              : `Switched active OpenAI account to profile '${name}'`,
           },
         ];
         await client.tui.showToast({
           body: {
-            message: email ? `OpenAI active: ${email}` : `OpenAI active profile: ${name}`,
+            message: email
+              ? `OpenAI active: ${email}`
+              : `OpenAI active profile: ${name}`,
             variant: "success",
           },
         });
@@ -403,8 +471,12 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
       } catch (error) {
         // Boundary: provide clear error feedback and rethrow so OpenCode logs it.
         const message = error instanceof Error ? error.message : String(error);
-        output.parts = [{ type: "text", text: `OpenAI multi-account error: ${message}` }];
-        await client.tui.showToast({ body: { message: `OpenAI multi-account error`, variant: "error" } });
+        output.parts = [
+          { type: "text", text: `OpenAI multi-account error: ${message}` },
+        ];
+        await client.tui.showToast({
+          body: { message: `OpenAI multi-account error`, variant: "error" },
+        });
         throw error;
       }
     },
