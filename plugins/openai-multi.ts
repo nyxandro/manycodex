@@ -276,17 +276,13 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
       // 1. Normalize Action
       let action: "list" | "save" | "del" | "load" | "unknown" = "unknown";
 
-      if (!rawSub || ["list", "help", "ls", "_list"].includes(rawSub)) {
+      if (!rawSub || rawSub === "list") {
         action = "list";
-      } else if (["save", "s"].includes(rawSub)) {
+      } else if (rawSub === "save") {
         action = "save";
-      } else if (["del", "delete", "rm", "remove", "d"].includes(rawSub)) {
+      } else if (rawSub === "del") {
         action = "del";
-      } else if (["load", "use", "switch", "l"].includes(rawSub)) {
-        action = "load";
-      } else {
-        // If the first argument isn't a keyword, assume it's a profile name/number for loading
-        // e.g. "/oai personal" or "/oai 1"
+      } else if (rawSub === "load") {
         action = "load";
       }
 
@@ -341,7 +337,7 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
 
             await client.tui.showToast({
               body: {
-                message: `Profiles: ${listStr}. Use '/oai load <name>' to switch.`,
+                message: `Profiles: ${listStr}. Use '/oai load <name>'.`,
                 variant: "info",
               },
               duration: 8000,
@@ -422,16 +418,7 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
         }
 
         if (action === "load") {
-          // If first arg was a command keyword (like 'load', 'use'), target is the second arg: argv[1].
-          // If first arg was NOT a keyword (implicit load: `/oai myprofile`), target is the first arg: rawSub.
-          let targetName = "";
-          // Re-check original sub to see if it was a keyword or not. rawSub holds normalized argv[0].
-          if (["load", "use", "switch", "l"].includes(rawSub)) {
-            targetName = argv[1] ?? "";
-          } else {
-            targetName = rawSub; // Implicit load
-          }
-
+          const targetName = argv[1] ?? "";
           if (!targetName) throw new Error("Usage: /oai load <name>");
 
           const storage = await loadStorage();
@@ -441,13 +428,14 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
 
           // Resolve number to name if possible
           const asNum = parseInt(targetName, 10);
+          let resolvedName = targetName;
           if (!isNaN(asNum) && asNum > 0 && asNum <= names.length) {
-            targetName = names[asNum - 1];
+            resolvedName = names[asNum - 1];
           }
 
-          const profile = storage.profiles[targetName];
+          const profile = storage.profiles[resolvedName];
           if (!profile) {
-            throw new Error(`Profile '${targetName}' not found.`);
+            throw new Error(`Profile '${resolvedName}' not found.`);
           }
 
           await client.auth.set({
@@ -467,13 +455,25 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           await client.tui.showToast({
             body: {
               message: email
-                ? `Active: ${targetName} (${email})`
-                : `Active: ${targetName}`,
+                ? `Active: ${resolvedName} (${email})`
+                : `Active: ${resolvedName}`,
               variant: "success",
             },
           });
           output.parts = [];
           return;
+        }
+
+        // Show help/list for unknown commands
+        if (action === "unknown") {
+          await client.tui.showToast({
+            body: {
+              message: "Unknown command. Available: list, save, load, del",
+              variant: "error",
+            },
+            duration: 5000,
+          });
+          output.parts = [];
         }
       } catch (error) {
         // Boundary: Use Toast for errors instead of Chat
