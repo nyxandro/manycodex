@@ -1,0 +1,12 @@
+# Plugin local storage (DO NOT COMMIT)
+openai-accounts.json
+
+# Node/Bun
+node_modules/
+bun.lock
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# OS
+.DS_Store

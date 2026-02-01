@@ -1,0 +1,11 @@
+{
+  "name": "opencode-openai-multi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenCode plugin: switch between multiple OpenAI OAuth accounts",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.1.48"
+  }
+}
