@@ -308,29 +308,44 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           let activeOauth: StoredOAuthProfile["oauth"] | undefined;
           try {
             const auth = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
-            // We access strictly to check validity, but don't throw if missing for list view
             if (auth[PROVIDER_ID]) {
               activeOauth = readOpenAiAuthFromAuthFile(auth);
             }
           } catch (e) {
-            /* ignore for list view */
+            /* ignore */
           }
 
           const names = Object.keys(storage.profiles).sort((a, b) =>
             a.localeCompare(b),
           );
 
-          // Output formatted list to chat (necessary evil for menu, but wrapped in code block)
-          output.parts = [
-            {
-              type: "text",
-              text: buildMenuText({
-                names,
-                profiles: storage.profiles,
-                activeOauth,
-              }),
-            },
-          ];
+          if (names.length === 0) {
+            await client.tui.showToast({
+              body: {
+                message: "No profiles. Use '/oai save <name>' to add one.",
+                variant: "info",
+              },
+              duration: 5000,
+            });
+          } else {
+            const listStr = names
+              .map((n) => {
+                const p = storage.profiles[n]!;
+                const active = activeOauth && isSameOauth(p.oauth, activeOauth);
+                return active ? `[${n}]` : n;
+              })
+              .join(", ");
+
+            await client.tui.showToast({
+              body: {
+                message: `Profiles: ${listStr}. Use '/oai <name>' to switch.`,
+                variant: "info",
+              },
+              duration: 8000,
+            });
+          }
+
+          output.parts = []; // Zero chat output
           return;
         }
 
