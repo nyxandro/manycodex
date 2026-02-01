@@ -290,23 +290,37 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
                 : sub;
 
       try {
-        // Default: show menu.
-        if (normalizedSub === "") {
+        // Validation helper for 'save' and strict checks
+        const ensureActiveAuth = async () => {
+          try {
+            const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
+            return readOpenAiAuthFromAuthFile(authFile);
+          } catch (e) {
+            throw new Error(
+              "No active OpenAI login found. Run /connect first.",
+            );
+          }
+        };
+
+        // 1. LIST (Default or explicit)
+        if (normalizedSub === "" || normalizedSub === "_list") {
           const storage = await loadStorage();
           let activeOauth: StoredOAuthProfile["oauth"] | undefined;
-
           try {
-            // Try to read active auth, but don't fail menu if missing
-            const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
-            activeOauth = readOpenAiAuthFromAuthFile(authFile);
+            const auth = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
+            // We access strictly to check validity, but don't throw if missing for list view
+            if (auth[PROVIDER_ID]) {
+              activeOauth = readOpenAiAuthFromAuthFile(auth);
+            }
           } catch (e) {
-            // Ignore auth errors in menu view (e.g. not connected yet)
+            /* ignore for list view */
           }
 
           const names = Object.keys(storage.profiles).sort((a, b) =>
             a.localeCompare(b),
           );
 
+          // Output formatted list to chat (necessary evil for menu, but wrapped in code block)
           output.parts = [
             {
               type: "text",
@@ -320,51 +334,19 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           return;
         }
 
-        // Hidden: list (kept for compatibility).
-        if (normalizedSub === "_list") {
-          const storage = await loadStorage();
-          const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
-          const activeOauth = readOpenAiAuthFromAuthFile(authFile);
-          const names = Object.keys(storage.profiles).sort((a, b) =>
-            a.localeCompare(b),
-          );
-          const lines = names.map((n) => {
-            const p = storage.profiles[n]!;
-            const activeMark = isSameOauth(p.oauth, activeOauth) ? "* " : "  ";
-            return activeMark + formatProfileLine(p);
-          });
-          output.parts = [
-            {
-              type: "text",
-              text:
-                lines.length === 0
-                  ? "No saved profiles."
-                  : ["Saved OpenAI profiles:", ...lines].join("\n"),
-            },
-          ];
-          return;
-        }
-
-        // Hidden: current (kept for compatibility).
-        if (normalizedSub === "_current") {
-          const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
-          const oauth = readOpenAiAuthFromAuthFile(authFile);
-          const exp = new Date(oauth.expires).toISOString();
-          output.parts = [
-            {
-              type: "text",
-              text: `Active OpenAI auth: oauth (expires=${exp}${oauth.accountId ? `, accountId=${oauth.accountId}` : ""})`,
-            },
-          ];
-          return;
-        }
-
+        // 2. SAVE
         if (normalizedSub === "save") {
           const name = argv[1] ?? "";
-          assertNonEmpty(name, "Profile name");
+          if (!name) throw new Error("Usage: /oai save <profile_name>");
 
-          const authFile = await readJsonFile<OpenCodeAuthFile>(AUTH_PATH);
-          const oauth = readOpenAiAuthFromAuthFile(authFile);
+          const oauth = await ensureActiveAuth();
+
+          // Basic validation of token existence (simple check)
+          if (!oauth.access || !oauth.refresh) {
+            throw new Error(
+              "Active OpenAI auth seems invalid (missing tokens). Try /connect again.",
+            );
+          }
 
           const storage = await loadStorage();
           storage.profiles[name] = {
@@ -374,94 +356,79 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           };
           await saveStorage(storage);
 
-          output.parts = [
-            {
-              type: "text",
-              text: `Saved profile '${name}' to ${STORAGE_PATH}`,
-            },
-          ];
           const email = extractEmailFromAccessToken(oauth.access);
           await client.tui.showToast({
             body: {
               message: email
-                ? `OpenAI profile saved: ${name} (${email})`
-                : `OpenAI profile saved: ${name}`,
+                ? `Saved profile '${name}' (${email})`
+                : `Saved profile '${name}'`,
               variant: "success",
             },
           });
+          // No chat output, keep it clean
+          output.parts = [];
           return;
         }
 
-        // Delete (public): /oai d <number>
+        // 3. REMOVE
         if (
           normalizedSub === "d" ||
           normalizedSub === "rm" ||
           normalizedSub === "remove"
         ) {
           const selector = argv[1] ?? "";
-          assertNonEmpty(selector, "Profile number");
+          if (!selector) throw new Error("Usage: /oai rm <name|number>");
 
           const storage = await loadStorage();
           const names = Object.keys(storage.profiles).sort((a, b) =>
             a.localeCompare(b),
           );
-          const asNumber = Number(selector);
-          const name =
-            Number.isFinite(asNumber) && String(asNumber) === selector
-              ? names[asNumber - 1]
-              : undefined;
-          if (!name)
-            throw new Error(`Invalid selection '${selector}'. Use: /oai`);
+
+          let name = selector;
+          const asNum = parseInt(selector, 10);
+          if (!isNaN(asNum) && asNum > 0 && asNum <= names.length) {
+            name = names[asNum - 1];
+          }
+
           if (!storage.profiles[name])
-            throw new Error(`Unknown profile '${name}'. Use: /oai`);
+            throw new Error(`Profile '${name}' not found.`);
 
           delete storage.profiles[name];
           await saveStorage(storage);
 
-          output.parts = [{ type: "text", text: `Removed profile '${name}'` }];
           await client.tui.showToast({
-            body: {
-              message: `OpenAI profile removed: ${name}`,
-              variant: "success",
-            },
+            body: { message: `Removed profile '${name}'`, variant: "success" },
           });
+          output.parts = [];
           return;
         }
 
-        /**
-         * Activate (public):
-         * - /oai <number>
-         * - /oai <name>
-         *
-         * Compatibility:
-         * - /oai use <number|name>
-         */
+        // 4. USE (ACTIVATE)
+        // Handle "/oai use <name>" or just "/oai <name>"
         if (normalizedSub === "use") {
           argv.shift();
         }
-
-        // At this point, treat the first token as selector.
-        const selector = normalizedSub;
-        assertNonEmpty(selector, "Profile name or number");
+        const selector = normalizedSub; // Now this is definitely the target
+        if (!selector) {
+          // Should have been caught by "list" case, but just in case
+          throw new Error("Usage: /oai <name|number>");
+        }
 
         const storage = await loadStorage();
         const names = Object.keys(storage.profiles).sort((a, b) =>
           a.localeCompare(b),
         );
 
-        const asNumber = Number(selector);
-        const name =
-          Number.isFinite(asNumber) && String(asNumber) === selector
-            ? names[asNumber - 1]
-            : selector;
-        if (!name) {
-          throw new Error(`Invalid selection '${selector}'. Use: /oai`);
+        let name = selector;
+        const asNum = parseInt(selector, 10);
+        if (!isNaN(asNum) && asNum > 0 && asNum <= names.length) {
+          name = names[asNum - 1];
         }
 
         const profile = storage.profiles[name];
-        if (!profile) throw new Error(`Unknown profile '${name}'. Use: /oai`);
+        if (!profile)
+          throw new Error(`Profile '${name}' not found. Use /oai to list.`);
 
-        // Only send fields supported by the SDK's OAuth type.
         await client.auth.set({
           path: { id: PROVIDER_ID },
           body: {
@@ -476,33 +443,25 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
         });
 
         const email = extractEmailFromAccessToken(profile.oauth.access);
-        output.parts = [
-          {
-            type: "text",
-            text: email
-              ? `OpenAI active: ${email}`
-              : `Switched active OpenAI account to profile '${name}'`,
-          },
-        ];
         await client.tui.showToast({
           body: {
-            message: email
-              ? `OpenAI active: ${email}`
-              : `OpenAI active profile: ${name}`,
+            message: email ? `Active: ${name} (${email})` : `Active: ${name}`,
             variant: "success",
           },
         });
+        output.parts = [];
         return;
       } catch (error) {
-        // Boundary: provide clear error feedback and rethrow so OpenCode logs it.
+        // Boundary: Use Toast for errors instead of Chat
         const message = error instanceof Error ? error.message : String(error);
-        output.parts = [
-          { type: "text", text: `OpenAI multi-account error: ${message}` },
-        ];
         await client.tui.showToast({
-          body: { message: `OpenAI multi-account error`, variant: "error" },
+          body: {
+            message: `Error: ${message}`,
+            variant: "error",
+          },
         });
-        throw error;
+        // Do NOT put error in chat output to avoid noise
+        output.parts = []; // Ensure no chat output on error
       }
     },
   };
