@@ -1,6 +1,6 @@
 ![OpenCode OpenAI Multi-Account Plugin](assets/demo.png)
 
-# opencode-openai-multi
+# OpenCode OpenAI Multi-Account Plugin
 
 Плагин для OpenCode, который добавляет ручное переключение между несколькими аккаунтами OpenAI, авторизованными через браузер (ChatGPT Plus/Pro OAuth).
 
