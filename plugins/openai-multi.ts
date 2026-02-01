@@ -282,7 +282,7 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
         sub === "help"
           ? ""
           : sub === "switch"
-            ? ""
+            ? "load"
             : sub === "list"
               ? "_list"
               : sub === "current"
@@ -364,6 +364,14 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           }
 
           const storage = await loadStorage();
+
+          // Check for existence
+          if (storage.profiles[name]) {
+            throw new Error(
+              `Profile '${name}' already exists. Use a different name.`,
+            );
+          }
+
           storage.profiles[name] = {
             name,
             oauth,
@@ -389,10 +397,11 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
         if (
           normalizedSub === "d" ||
           normalizedSub === "rm" ||
-          normalizedSub === "remove"
+          normalizedSub === "remove" ||
+          normalizedSub === "del"
         ) {
           const selector = argv[1] ?? "";
-          if (!selector) throw new Error("Usage: /oai rm <name|number>");
+          if (!selector) throw new Error("Usage: /oai del <name>");
 
           const storage = await loadStorage();
           const names = Object.keys(storage.profiles).sort((a, b) =>
@@ -418,15 +427,16 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
           return;
         }
 
-        // 4. USE (ACTIVATE)
-        // Handle "/oai use <name>" or just "/oai <name>"
-        if (normalizedSub === "use") {
+        // 4. LOAD (USE/ACTIVATE)
+        // Handle "/oai use <name>" or "/oai load <name>" or just "/oai <name>"
+        if (normalizedSub === "use" || normalizedSub === "load") {
           argv.shift();
         }
-        const selector = normalizedSub; // Now this is definitely the target
-        if (!selector) {
-          // Should have been caught by "list" case, but just in case
-          throw new Error("Usage: /oai <name|number>");
+        const selector = argv[0] ?? normalizedSub;
+
+        // If the command was just "/oai load" or "/oai use" without args:
+        if (!selector || selector === "use" || selector === "load") {
+          throw new Error("Usage: /oai load <name>");
         }
 
         const storage = await loadStorage();
@@ -442,7 +452,9 @@ export const OpenAIMultiAccountPlugin: Plugin = async ({ client }) => {
 
         const profile = storage.profiles[name];
         if (!profile)
-          throw new Error(`Profile '${name}' not found. Use /oai to list.`);
+          throw new Error(
+            `Profile '${name}' not found. Use '/oai list' to see available.`,
+          );
 
         await client.auth.set({
           path: { id: PROVIDER_ID },
